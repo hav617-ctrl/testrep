@@ -33,14 +33,18 @@ def find_first_nonempty_sheet(wb):
 
 
 def copy_sheet_to_new_workbook(src_ws) -> Workbook:
-    """シートの内容・スタイルを新しいワークブックへコピーして返す。"""
+    """A・B列のみ新しいワークブックへコピーして返す。列幅は内容に合わせて自動調整。"""
     new_wb = Workbook()
     new_ws = new_wb.active
     new_ws.title = src_ws.title
 
-    # セル値・スタイルをコピー
+    max_width = {1: 0, 2: 0}  # 列ごとの最大文字数
+
+    # A列(1)・B列(2)のみコピー
     for row in src_ws.iter_rows():
         for cell in row:
+            if cell.column not in (1, 2):
+                continue
             new_cell = new_ws.cell(row=cell.row, column=cell.column, value=cell.value)
             if cell.has_style:
                 new_cell.font = copy(cell.font)
@@ -49,18 +53,20 @@ def copy_sheet_to_new_workbook(src_ws) -> Workbook:
                 new_cell.number_format = cell.number_format
                 new_cell.protection = copy(cell.protection)
                 new_cell.alignment = copy(cell.alignment)
+            # 列幅計算用に文字数を記録
+            length = len(str(cell.value)) if cell.value is not None else 0
+            max_width[cell.column] = max(max_width[cell.column], length)
 
-    # 列幅・行高をコピー
-    for col_letter, col_dim in src_ws.column_dimensions.items():
-        new_ws.column_dimensions[col_letter].width = col_dim.width
-        new_ws.column_dimensions[col_letter].hidden = col_dim.hidden
+    # 列幅を内容に合わせて設定（最小8、最大60）
+    for col_num, width in max_width.items():
+        from openpyxl.utils import get_column_letter
+        col_letter = get_column_letter(col_num)
+        new_ws.column_dimensions[col_letter].width = max(8, min(width + 4, 60))
+
+    # 行高をコピー
     for row_num, row_dim in src_ws.row_dimensions.items():
         new_ws.row_dimensions[row_num].height = row_dim.height
         new_ws.row_dimensions[row_num].hidden = row_dim.hidden
-
-    # 結合セルをコピー
-    for merge_range in src_ws.merged_cells.ranges:
-        new_ws.merge_cells(str(merge_range))
 
     return new_wb
 
@@ -97,7 +103,10 @@ def main():
     args = parser.parse_args()
 
     if args.files:
-        targets = [Path(f) for f in args.files]
+        targets = []
+        for f in args.files:
+            matched = sorted(Path(".").glob(f)) if ("*" in f or "?" in f) else [Path(f)]
+            targets.extend(matched)
     else:
         targets = sorted(Path(args.dir).glob("*.xlsm"))
 
