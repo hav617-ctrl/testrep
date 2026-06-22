@@ -11,6 +11,7 @@
 
 import argparse
 import sys
+from copy import copy
 from pathlib import Path
 
 import openpyxl
@@ -42,12 +43,12 @@ def copy_sheet_to_new_workbook(src_ws) -> Workbook:
         for cell in row:
             new_cell = new_ws.cell(row=cell.row, column=cell.column, value=cell.value)
             if cell.has_style:
-                new_cell.font = cell.font.copy()
-                new_cell.border = cell.border.copy()
-                new_cell.fill = cell.fill.copy()
+                new_cell.font = copy(cell.font)
+                new_cell.border = copy(cell.border)
+                new_cell.fill = copy(cell.fill)
                 new_cell.number_format = cell.number_format
-                new_cell.protection = cell.protection.copy()
-                new_cell.alignment = cell.alignment.copy()
+                new_cell.protection = copy(cell.protection)
+                new_cell.alignment = copy(cell.alignment)
 
     # 列幅・行高をコピー
     for col_letter, col_dim in src_ws.column_dimensions.items():
