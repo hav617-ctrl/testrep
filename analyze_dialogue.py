@@ -8,6 +8,7 @@ comments to those cells.
 """
 
 import json
+import os
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext
@@ -64,8 +65,8 @@ def build_prompt(rows: list[dict]) -> str:
 selectionは最大3件です。最も深まりが顕著な箇所を優先してください。"""
 
 
-def call_claude(conversation_rows: list[dict]) -> list[dict]:
-    client = anthropic.Anthropic()
+def call_claude(api_key: str, conversation_rows: list[dict]) -> list[dict]:
+    client = anthropic.Anthropic(api_key=api_key)
     prompt = build_prompt(conversation_rows)
 
     response = client.messages.create(
@@ -122,7 +123,7 @@ class App(tk.Tk):
         super().__init__()
         self.title("対話分析 - 垂直的な深まり検出")
         self.resizable(True, True)
-        self.minsize(640, 480)
+        self.minsize(640, 520)
 
         self._input_path: str = ""
         self._workbook = None
@@ -154,18 +155,34 @@ class App(tk.Tk):
         self.bind_all("<Control-s>", lambda _: self._save_file())
 
     def _build_body(self):
+        # ---- API key row ----
+        key_frame = tk.Frame(self, padx=8, pady=6)
+        key_frame.pack(fill="x")
+
+        tk.Label(key_frame, text="Anthropic API キー:").pack(side="left")
+        self._api_key_var = tk.StringVar(value=os.environ.get("ANTHROPIC_API_KEY", ""))
+        api_entry = tk.Entry(key_frame, textvariable=self._api_key_var,
+                             show="*", width=55)
+        api_entry.pack(side="left", padx=6)
+
+        # Toggle show/hide
+        self._show_key = False
+        self._toggle_btn = tk.Button(key_frame, text="表示",
+                                     command=lambda: self._toggle_key_visibility(api_entry))
+        self._toggle_btn.pack(side="left")
+
         # ---- File path row ----
-        path_frame = tk.Frame(self, padx=8, pady=6)
+        path_frame = tk.Frame(self, padx=8, pady=4)
         path_frame.pack(fill="x")
 
-        tk.Label(path_frame, text="入力ファイル:").pack(side="left")
+        tk.Label(path_frame, text="入力ファイル:     ").pack(side="left")
         self._path_var = tk.StringVar(value="（未選択）")
         tk.Label(path_frame, textvariable=self._path_var,
-                 relief="sunken", anchor="w", width=60).pack(side="left", padx=6)
+                 relief="sunken", anchor="w", width=55).pack(side="left", padx=6)
         tk.Button(path_frame, text="参照...", command=self._open_file).pack(side="left")
 
-        # ---- Run button ----
-        btn_frame = tk.Frame(self, padx=8, pady=4)
+        # ---- Run / Save buttons ----
+        btn_frame = tk.Frame(self, padx=8, pady=6)
         btn_frame.pack(fill="x")
         self._run_btn = tk.Button(btn_frame, text="分析を実行する",
                                   command=self._run_analysis,
@@ -185,10 +202,15 @@ class App(tk.Tk):
         self._log.pack(fill="both", expand=True)
 
         # ---- Status bar ----
-        self._status_var = tk.StringVar(value="ファイルを選択してください。")
+        self._status_var = tk.StringVar(value="API キーを入力してファイルを選択してください。")
         status_bar = tk.Label(self, textvariable=self._status_var,
                               bd=1, relief="sunken", anchor="w", padx=4)
         status_bar.pack(fill="x", side="bottom")
+
+    def _toggle_key_visibility(self, entry: tk.Entry):
+        self._show_key = not self._show_key
+        entry.config(show="" if self._show_key else "*")
+        self._toggle_btn.config(text="隠す" if self._show_key else "表示")
 
     # ------------------------------------------------------------------
     # Actions
@@ -214,6 +236,12 @@ class App(tk.Tk):
         self._log_write(f"入力ファイル: {path}\n")
 
     def _run_analysis(self):
+        api_key = self._api_key_var.get().strip()
+        if not api_key:
+            messagebox.showwarning("APIキー未入力",
+                                   "Anthropic API キーを入力してください。\n"
+                                   "APIキーは https://console.anthropic.com/ で取得できます。")
+            return
         if not self._input_path:
             messagebox.showwarning("警告", "先にファイルを選択してください。")
             return
@@ -222,10 +250,11 @@ class App(tk.Tk):
         self._save_btn.config(state="disabled")
         self._file_menu.entryconfig("結果を名前を付けて保存...", state="disabled")
         self._set_status("分析中...")
-        thread = threading.Thread(target=self._analysis_worker, daemon=True)
+        thread = threading.Thread(target=self._analysis_worker,
+                                  args=(api_key,), daemon=True)
         thread.start()
 
-    def _analysis_worker(self):
+    def _analysis_worker(self, api_key: str):
         try:
             self._log_write("Excelファイルを読み込んでいます...\n")
             wb = load_workbook(self._input_path)
@@ -240,7 +269,7 @@ class App(tk.Tk):
 
             self._log_write("Claude に垂直的な深まりを分析させています...\n"
                             "（APIの応答に数十秒かかる場合があります）\n")
-            selections = call_claude(rows)
+            selections = call_claude(api_key, rows)
             self._log_write(f"  {len(selections)} か所の垂直的な深まりを特定しました\n\n")
 
             self._log_write("セルに書式を適用しています...\n")
